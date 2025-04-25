@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use async_zip::base::read::seek::ZipFileReader;
 use error::UnzipFileError;
 use futures::{FutureExt, future::BoxFuture};
-use indicatif::ProgressBar;
+use indicatif::{MultiProgress, ProgressBar};
 use tokio::{
   fs::{self, File, OpenOptions, create_dir_all},
   io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
@@ -116,8 +116,11 @@ pub async fn io_copy_with_progressbar(
   mut write: impl AsyncWrite + Unpin,
   len: u64,
   title: impl Into<String>,
+  multi_progress: Option<&MultiProgress>,
 ) -> Result<(), GetGameVersionsError> {
-  let pb = ProgressBar::new(len);
+  let pb = multi_progress
+    .map(|x| x.add(ProgressBar::new(len)))
+    .unwrap_or_else(|| ProgressBar::new(len));
   pb.set_message(title.into());
   let mut buf = [0u8; 1024];
   loop {

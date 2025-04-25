@@ -14,7 +14,7 @@ use cache_download_record::CacheDownloadRecord;
 use chrono::TimeZone;
 use futures::TryStreamExt;
 use headers::{ContentType, HeaderMapExt};
-use indicatif::ProgressBar;
+use indicatif::{MultiProgress, ProgressBar};
 use temp_dir::TempDir;
 use tokio::{
   fs::{self, File},
@@ -34,6 +34,7 @@ pub struct Kmf {
   cache_dir: PathBuf,
   reqwest_client: reqwest_middleware::ClientWithMiddleware,
   resolver: Resolver,
+  multi_progress: MultiProgress,
 }
 
 impl Kmf {
@@ -57,11 +58,14 @@ impl Kmf {
     let client = reqwest::Client::new();
     let client = reqwest_middleware::ClientBuilder::new(client).build();
 
+    let multi_progress = MultiProgress::new();
+
     Ok(Self {
       default_game,
       cache_dir,
       reqwest_client: client,
       resolver: Resolver::new()?,
+      multi_progress,
     })
   }
 
@@ -118,6 +122,7 @@ impl Kmf {
           File::create_new(file_path.as_path()).await?,
           content_length,
           "Downloading",
+          Some(&self.multi_progress),
         )
         .await?;
         debug!("download completed");
@@ -140,7 +145,12 @@ impl Kmf {
 
   async fn create_cache_mod(&self, source: Url) -> Result<(PathBuf, String), Error> {
     let mut record = self.cache_download_record().await?;
-    let Resolved { id, source, .. } = self.resolver.resolve(source.to_owned()).await?;
+    let Resolved {
+      id,
+      source,
+      specifier,
+      ..
+    } = self.resolver.resolve(source.to_owned()).await?;
     let mods_dir = self.cache_dir.join("mods");
     if !fs::try_exists(mods_dir.as_path()).await? {
       fs::create_dir_all(mods_dir.as_path()).await?;
@@ -151,7 +161,7 @@ impl Kmf {
 
     record.insert(
       id.to_owned(),
-      CacheDownloadRecord::new(source, chrono::Local::now().naive_local()),
+      CacheDownloadRecord::new(specifier, source, chrono::Local::now().naive_local()),
     );
 
     self.set_cache_download_record(&record).await?;
@@ -176,6 +186,7 @@ impl Kmf {
     let Resolved {
       last_updated: last_modified,
       source,
+      specifier,
       ..
     } = self.resolver.resolve(cache_record.source()).await?;
 
@@ -183,7 +194,11 @@ impl Kmf {
       let mut record = record.clone();
       record.insert(
         id.to_string(),
-        CacheDownloadRecord::new(cache_record.source(), chrono::Local::now().naive_local()),
+        CacheDownloadRecord::new(
+          specifier,
+          source.to_owned(),
+          chrono::Local::now().naive_local(),
+        ),
       );
       self
         .cache_mod_to_dir(&source, cache_mod_root.as_path())
@@ -195,8 +210,12 @@ impl Kmf {
   }
 
   async fn pick_cache_mod(&self, source: &Url) -> Result<(PathBuf, String), Error> {
+    let Resolved { specifier, .. } = self.resolver.resolve(source.to_owned()).await?;
     let cache_record = self.cache_download_record().await?;
-    if let Some((id, _)) = cache_record.iter().find(|(_, x)| &x.source() == source) {
+    if let Some((id, _)) = cache_record
+      .iter()
+      .find(|(_, x)| x.specifier() == specifier)
+    {
       self.ensure_lastest_cache_mod(id).await?;
       let mod_dir = self.cache_dir.join("mods").join(id);
       Ok((mod_dir, id.to_owned()))
@@ -206,14 +225,14 @@ impl Kmf {
   }
 
   async fn task_install(&self, url: &Url, game: &Url) -> Result<(), Error> {
-    let pb = ProgressBar::new_spinner();
+    let pb = self.multi_progress.add(ProgressBar::new_spinner());
     pb.enable_steady_tick(Duration::from_millis(100));
     pb.set_message("缓存中");
     let (mod_cache_root, _id) = self.pick_cache_mod(url).await?;
     pb.set_message("缓存完成");
     pb.finish();
 
-    let pb = ProgressBar::new_spinner();
+    let pb = self.multi_progress.add(ProgressBar::new_spinner());
     pb.enable_steady_tick(Duration::from_millis(100));
     pb.set_message("检查游戏版本中");
     let game_root = match game.scheme() {
@@ -250,7 +269,7 @@ impl Kmf {
       .join(version)
       .join("res_mods");
 
-    let pb = ProgressBar::new_spinner();
+    let pb = self.multi_progress.add(ProgressBar::new_spinner());
     pb.enable_steady_tick(Duration::from_millis(100));
     pb.set_message("安装中");
     async_copy_dir(mod_cache_root, res_mods_root).await?;

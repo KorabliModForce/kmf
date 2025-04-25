@@ -25,10 +25,14 @@ impl Resolver {
     })
   }
 
-  pub async fn resolve(&self, source: Url) -> Result<Resolved, Error> {
-    match source.scheme() {
+  pub async fn resolve(&self, specifier: Url) -> Result<Resolved, Error> {
+    match specifier.scheme() {
       "http" | "https" => {
-        let res = self.reqwest_client.head(source.to_owned()).send().await?;
+        let res = self
+          .reqwest_client
+          .head(specifier.to_owned())
+          .send()
+          .await?;
 
         let headers = res.headers();
         let content_length = headers
@@ -40,12 +44,14 @@ impl Resolver {
           .map(Into::<SystemTime>::into)
           .map(|x| x.into())
           .unwrap_or_default();
-        let id = generate_url_id(source.as_str());
+        let id = generate_url_id(specifier.as_str());
+        let source = res.url().to_owned();
 
         Ok(Resolved {
           content_length,
           id,
           last_updated,
+          specifier,
           source,
         })
       }
@@ -56,6 +62,7 @@ impl Resolver {
 
 pub struct Resolved {
   pub id: String,
+  pub specifier: Url,
   pub source: Url,
   pub last_updated: DateTime<Utc>,
   pub content_length: u64,
