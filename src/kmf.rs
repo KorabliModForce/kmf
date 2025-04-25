@@ -1,18 +1,19 @@
 use std::{
   collections::HashMap,
   path::{Path, PathBuf},
-  time::{Duration, SystemTime},
+  time::Duration,
 };
 
 use crate::{
   config::Config,
+  resolve::{Resolved, Resolver},
   task::Task,
   util::{async_copy_dir, empty_dir, get_game_versions, io_copy_with_progressbar, unzip_file},
 };
 use cache_download_record::CacheDownloadRecord;
-use chrono::{DateTime, TimeZone};
+use chrono::TimeZone;
 use futures::TryStreamExt;
-use headers::{ContentLength, ContentType, HeaderMapExt, LastModified};
+use headers::{ContentType, HeaderMapExt};
 use indicatif::ProgressBar;
 use temp_dir::TempDir;
 use tokio::{
@@ -27,12 +28,12 @@ use error::Error;
 use tokio_util::io::StreamReader;
 use tracing::debug;
 use url::Url;
-use uuid::Uuid;
 
 pub struct Kmf {
   default_game: Option<Url>,
   cache_dir: PathBuf,
   reqwest_client: reqwest_middleware::ClientWithMiddleware,
+  resolver: Resolver,
 }
 
 impl Kmf {
@@ -60,6 +61,7 @@ impl Kmf {
       default_game,
       cache_dir,
       reqwest_client: client,
+      resolver: Resolver::new()?,
     })
   }
 
@@ -95,13 +97,7 @@ impl Kmf {
     let temp_dir = TempDir::with_prefix("kmf")?;
     let zip_file = match source.scheme() {
       "http" | "https" => {
-        let res = self.reqwest_client.head(source.to_owned()).send().await?;
-
-        let content_length = res
-          .headers()
-          .typed_get::<ContentLength>()
-          .map(|x| x.0)
-          .unwrap_or_default();
+        let Resolved { content_length, .. } = self.resolver.resolve(source.to_owned()).await?;
 
         let file_path = temp_dir.path().join("mod.zip");
 
@@ -144,12 +140,7 @@ impl Kmf {
 
   async fn create_cache_mod(&self, source: Url) -> Result<(PathBuf, String), Error> {
     let mut record = self.cache_download_record().await?;
-    let id = match source.scheme() {
-      // 网络上下载的的Mod就随机分配个UUID好了
-      "http" | "https" => Uuid::new_v4().to_string(),
-      // 走特定协议的Mod再考虑一下
-      _ => todo!(),
-    };
+    let Resolved { id, source, .. } = self.resolver.resolve(source.to_owned()).await?;
     let mods_dir = self.cache_dir.join("mods");
     if !fs::try_exists(mods_dir.as_path()).await? {
       fs::create_dir_all(mods_dir.as_path()).await?;
@@ -182,26 +173,20 @@ impl Kmf {
       .single()
       .expect("datetime stored should always be valid");
 
-    let res = self
-      .reqwest_client
-      .head(cache_record.source().as_ref())
-      .send()
-      .await?;
+    let Resolved {
+      last_updated: last_modified,
+      source,
+      ..
+    } = self.resolver.resolve(cache_record.source()).await?;
 
-    let last_modified = res
-      .headers()
-      .typed_get::<LastModified>()
-      .map(Into::<SystemTime>::into)
-      .map(Into::<DateTime<chrono::Utc>>::into);
-
-    if last_modified.is_none_or(|x| x > last_updated) {
+    if last_modified > last_updated {
       let mut record = record.clone();
       record.insert(
         id.to_string(),
         CacheDownloadRecord::new(cache_record.source(), chrono::Local::now().naive_local()),
       );
       self
-        .cache_mod_to_dir(&cache_record.source(), cache_mod_root.as_path())
+        .cache_mod_to_dir(&source, cache_mod_root.as_path())
         .await?;
       self.set_cache_download_record(&record).await?;
     }
@@ -280,7 +265,7 @@ impl Kmf {
       Task::Install { url, game } => {
         let game = game
           .or(self.default_game.to_owned())
-          .unwrap_or_else(|| panic!(""));
+          .ok_or(Error::GameNotSpecified)?;
         for url in url {
           self.task_install(&url, &game).await?;
         }

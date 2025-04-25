@@ -8,6 +8,9 @@ use tokio::{
   fs::{self, File, OpenOptions, create_dir_all},
   io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
 };
+
+use sha2::{Digest, Sha256};
+use std::fmt::Write;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 pub mod error;
@@ -162,4 +165,62 @@ fn async_copy_dir_inner(
 
 pub async fn async_copy_dir(src: PathBuf, dst: PathBuf) -> Result<(), tokio::io::Error> {
   async_copy_dir_inner(src, dst).await
+}
+
+pub fn generate_url_id(url: &str) -> String {
+  let mut hasher = Sha256::new();
+  hasher.update(url.as_bytes());
+  let hash = hasher.finalize();
+
+  let hex_str = hash.iter().fold(String::with_capacity(64), |mut s, b| {
+    let _ = write!(s, "{:02x}", b);
+    s
+  });
+
+  let replaced: String = hex_str
+    .chars()
+    .map(|c| match c {
+      '0'..='9' => (b'g' + (c as u8 - b'0')) as char,
+      _ => c,
+    })
+    .collect();
+
+  let chunked: String = replaced
+    .chars()
+    .enumerate()
+    .flat_map(|(i, c)| {
+      let hyphen = if i > 0 && i % 4 == 0 { Some('-') } else { None };
+      hyphen.into_iter().chain(std::iter::once(c))
+    })
+    .collect();
+
+  let mut output: String = chunked.chars().take(24).collect();
+
+  if output.ends_with('-') {
+    output.pop();
+  }
+
+  output
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_generate_id() {
+    let url = "https://example.com";
+    let id = generate_url_id(url);
+
+    // 验证长度和字符集
+    assert!(id.len() >= 20 && id.len() <= 24);
+    assert!(id.chars().all(|c| c.is_ascii_lowercase() || c == '-'));
+
+    // 验证确定性
+    assert_eq!(generate_url_id(url), generate_url_id(url));
+
+    // 验证不同输入不同输出
+    let diff_url_id = generate_url_id("https://example.org");
+    assert_ne!(id, diff_url_id);
+  }
 }
