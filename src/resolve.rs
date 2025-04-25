@@ -28,7 +28,7 @@ impl Resolver {
   pub async fn resolve(&self, source: Url) -> Result<Resolved, Error> {
     match source.scheme() {
       "http" | "https" => {
-        let res = self.reqwest_client.head(source).send().await?;
+        let res = self.reqwest_client.head(source.to_owned()).send().await?;
 
         let headers = res.headers();
         let content_length = headers
@@ -40,7 +40,6 @@ impl Resolver {
           .map(Into::<SystemTime>::into)
           .map(|x| x.into())
           .unwrap_or_default();
-        let source = res.url().to_owned();
         let id = generate_url_id(source.as_str());
 
         Ok(Resolved {
