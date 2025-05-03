@@ -9,8 +9,6 @@ use tokio::{
   io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
 };
 
-use sha2::{Digest, Sha256};
-use std::fmt::Write;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 pub mod error;
@@ -70,6 +68,8 @@ pub async fn unzip_file(archive: File, out_dir: &Path) -> Result<(), UnzipFileEr
   Ok(())
 }
 
+// 获取游戏根目录下所有的版本
+// 默认返回排序为降序
 pub async fn get_game_versions(
   game_root: impl AsRef<Path>,
 ) -> Result<Vec<String>, GetGameVersionsError> {
@@ -111,6 +111,7 @@ pub async fn get_game_versions(
   Ok(versions)
 }
 
+#[allow(dead_code)]
 pub async fn io_copy_with_progressbar(
   mut read: impl AsyncRead + Unpin,
   mut write: impl AsyncWrite + Unpin,
@@ -136,11 +137,30 @@ pub async fn io_copy_with_progressbar(
 }
 
 pub async fn empty_dir(dir_path: &Path) -> Result<(), std::io::Error> {
-  // 删除整个目录（包括子目录和文件）
   fs::remove_dir_all(dir_path).await?;
-  // 重新创建空目录
   fs::create_dir_all(dir_path).await?;
   Ok(())
+}
+
+pub async fn ensure_dir(dir_path: &Path) -> Result<&Path, std::io::Error> {
+  if !fs::try_exists(dir_path).await? {
+    fs::create_dir_all(dir_path).await?;
+  } else if fs::metadata(dir_path).await?.is_file() {
+    fs::remove_file(dir_path).await?;
+    fs::create_dir_all(dir_path).await?;
+  }
+  Ok(dir_path)
+}
+
+pub async fn ensure_file(file_path: &Path) -> Result<&Path, std::io::Error> {
+  if !fs::try_exists(file_path).await? {
+    fs::create_dir_all(file_path.parent().expect("File always has parent")).await?;
+    File::create_new(file_path).await?;
+  } else if fs::metadata(file_path).await?.is_dir() {
+    fs::remove_dir_all(file_path).await?;
+    File::create_new(file_path).await?;
+  }
+  Ok(file_path)
 }
 
 fn async_copy_dir_inner(
@@ -168,62 +188,4 @@ fn async_copy_dir_inner(
 
 pub async fn async_copy_dir(src: PathBuf, dst: PathBuf) -> Result<(), tokio::io::Error> {
   async_copy_dir_inner(src, dst).await
-}
-
-pub fn generate_url_id(url: &str) -> String {
-  let mut hasher = Sha256::new();
-  hasher.update(url.as_bytes());
-  let hash = hasher.finalize();
-
-  let hex_str = hash.iter().fold(String::with_capacity(64), |mut s, b| {
-    let _ = write!(s, "{:02x}", b);
-    s
-  });
-
-  let replaced: String = hex_str
-    .chars()
-    .map(|c| match c {
-      '0'..='9' => (b'g' + (c as u8 - b'0')) as char,
-      _ => c,
-    })
-    .collect();
-
-  let chunked: String = replaced
-    .chars()
-    .enumerate()
-    .flat_map(|(i, c)| {
-      let hyphen = if i > 0 && i % 4 == 0 { Some('-') } else { None };
-      hyphen.into_iter().chain(std::iter::once(c))
-    })
-    .collect();
-
-  let mut output: String = chunked.chars().take(24).collect();
-
-  if output.ends_with('-') {
-    output.pop();
-  }
-
-  output
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn test_generate_id() {
-    let url = "https://example.com";
-    let id = generate_url_id(url);
-
-    // 验证长度和字符集
-    assert!(id.len() >= 20 && id.len() <= 24);
-    assert!(id.chars().all(|c| c.is_ascii_lowercase() || c == '-'));
-
-    // 验证确定性
-    assert_eq!(generate_url_id(url), generate_url_id(url));
-
-    // 验证不同输入不同输出
-    let diff_url_id = generate_url_id("https://example.org");
-    assert_ne!(id, diff_url_id);
-  }
 }

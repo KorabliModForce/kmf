@@ -1,11 +1,9 @@
-use crate::{resolve, util};
+use crate::{resolver, util};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
   #[error("game not specified")]
   GameNotSpecified,
-  #[error("cache dir is not a dir")]
-  CacheDirIsNotADir,
   #[error("version not found: {version}")]
   VersionNotFound { version: String },
   #[error("std::io: {0}")]
@@ -22,6 +20,8 @@ pub enum Error {
   TomlDe(#[from] toml::de::Error),
   #[error("toml::ser: {0}")]
   TomlSer(#[from] toml::ser::Error),
-  #[error("resolve: {0}")]
-  Resolve(#[from] resolve::Error),
+  #[error("resolver: {0}")]
+  Resolver(#[from] resolver::Error),
+  #[error("mod not found")]
+  ModNotFound,
 }

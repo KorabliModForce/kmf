@@ -5,7 +5,7 @@ mod cli;
 mod config;
 mod error;
 mod kmf;
-mod resolve;
+mod resolver;
 mod task;
 mod util;
 
