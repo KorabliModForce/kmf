@@ -2,7 +2,10 @@ use std::{path::PathBuf, time::Duration};
 
 use crate::{
   config::Config,
-  resolver::{self, impls::web::WebResolver},
+  resolver::{
+    self,
+    impls::{kmf::KmfResolver, web::WebResolver},
+  },
   task::Task,
   util::{async_copy_dir, ensure_dir, ensure_file, get_game_versions},
 };
@@ -32,7 +35,18 @@ impl Kmf {
     Ok(Self {
       default_game,
       multi_progress,
-      resolvers: vec![{
+      resolvers: vec![
+        Box::new(KmfResolver::new(
+          ensure_file(cache_dir.join("kmf_resolver.toml").as_path())
+            .await?
+            .to_path_buf(),
+          ensure_dir(cache_dir.join("kmf_resolver").as_path())
+            .await?
+            .to_path_buf(),
+          ensure_dir(cache_dir.join("kmf_resolver_ca_cache_dir").as_path())
+            .await?
+            .to_path_buf(),
+        )?),
         Box::new(WebResolver::new(
           ensure_file(cache_dir.join("web_resolver.toml").as_path())
             .await?
@@ -40,8 +54,11 @@ impl Kmf {
           ensure_dir(cache_dir.join("web_resolver").as_path())
             .await?
             .to_path_buf(),
-        )?)
-      }],
+          ensure_dir(cache_dir.join("web_resolver_ca_cache_dir").as_path())
+            .await?
+            .to_path_buf(),
+        )?),
+      ],
     })
   }
 

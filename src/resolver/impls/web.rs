@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use headers::{ContentLength, HeaderMapExt, LastModified};
+use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::{
@@ -15,6 +16,7 @@ use tokio::{
   io,
 };
 use tokio_util::io::StreamReader;
+use tracing::debug;
 use url::Url;
 
 use crate::resolver::Resolver;
@@ -41,11 +43,21 @@ pub struct WebResolver {
 }
 
 impl WebResolver {
-  pub fn new(cache_record_file: PathBuf, cache_dir: PathBuf) -> Result<Self> {
+  pub fn new(
+    cache_record_file: PathBuf,
+    cache_dir: PathBuf,
+    ca_cache_dir: PathBuf,
+  ) -> Result<Self> {
     Ok(Self {
       cache_record_file,
       cache_dir,
-      reqwest_client: reqwest_middleware::ClientBuilder::new(reqwest::Client::new()).build(),
+      reqwest_client: reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
+        .with(Cache(HttpCache {
+          mode: CacheMode::Default,
+          manager: CACacheManager { path: ca_cache_dir },
+          options: HttpCacheOptions::default(),
+        }))
+        .build(),
     })
   }
 }
@@ -71,11 +83,11 @@ impl WebResolver {
 }
 
 impl WebResolver {
-  fn can_resolve(&self, url: Url) -> bool {
+  pub fn can_resolve(&self, url: Url) -> bool {
     matches!(url.scheme(), "http" | "https")
   }
 
-  async fn resolve(&self, url: Url) -> Result<ResolveInfo> {
+  pub async fn resolve(&self, url: Url) -> Result<ResolveInfo> {
     if !self.can_resolve(url.to_owned()) {
       return Err(Error::CannotResolve);
     }
@@ -102,7 +114,7 @@ impl WebResolver {
     })
   }
 
-  async fn is_up_to_date(&self, url: Url) -> Result<bool> {
+  pub async fn is_up_to_date(&self, url: Url) -> Result<bool> {
     let cache_record = self.read_cache_record().await?;
     let Some((_, cache_record)) = cache_record.iter().find(|(_, v)| v.url == url) else {
       return Ok(false);
@@ -111,10 +123,11 @@ impl WebResolver {
     Ok(cache_record.last_updated == latest_resolve_info.last_updated)
   }
 
-  async fn cache(&self, url: Url) -> Result<PathBuf> {
+  pub async fn cache(&self, url: Url) -> Result<PathBuf> {
     let resolve_info = self.resolve(url.to_owned()).await?;
     let cache_dir = self.cache_dir.join(resolve_info.id.as_str());
     if self.is_up_to_date(url.to_owned()).await? {
+      debug!("reuse current cache: {:?}", cache_dir);
       // 不需要重新缓存
       return Ok(cache_dir.to_owned());
     }
@@ -123,6 +136,7 @@ impl WebResolver {
     let mut cache_records = self.read_cache_record().await?;
     cache_records.insert(resolve_info.id.to_string(), cache_record);
     let res = self.reqwest_client.get(url.to_owned()).send().await?;
+    debug!("make temp dir");
     let temp_dir = temp_dir::TempDir::new()?;
     let temp_file = temp_dir.path().join("cache");
     {
@@ -138,13 +152,15 @@ impl WebResolver {
         .await?;
       io::copy(&mut read, &mut write).await?;
     }
+    debug!("empty cache dir: {:?}", cache_dir);
     empty_dir(cache_dir.as_path()).await?;
+    debug!("unzip {:?} -> {:?}", temp_file, cache_dir);
     unzip_file(File::open(temp_file.as_path()).await?, cache_dir.as_path()).await?;
     self.write_cache_record(&cache_records).await?;
     Ok(cache_dir)
   }
 
-  async fn clear_cache(&self) -> Result<()> {
+  pub async fn clear_cache(&self) -> Result<()> {
     empty_dir(self.cache_dir.as_path()).await?;
     Ok(())
   }

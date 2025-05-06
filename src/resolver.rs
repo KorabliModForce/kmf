@@ -22,6 +22,8 @@ pub enum Error {
   TomlSer(#[from] toml::ser::Error),
   #[error("UnzipFile: {0}")]
   UnzipFile(#[from] UnzipFileError),
+  #[error("url::Parse: {0}")]
+  UrlParse(#[from] url::ParseError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

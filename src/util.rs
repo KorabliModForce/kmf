@@ -137,7 +137,13 @@ pub async fn io_copy_with_progressbar(
 }
 
 pub async fn empty_dir(dir_path: &Path) -> Result<(), std::io::Error> {
-  fs::remove_dir_all(dir_path).await?;
+  match fs::remove_dir_all(dir_path).await {
+    Ok(_) => {}
+    Err(err) => match err.kind() {
+      std::io::ErrorKind::NotFound => {}
+      _ => return Err(err),
+    },
+  }
   fs::create_dir_all(dir_path).await?;
   Ok(())
 }
