@@ -2,6 +2,10 @@
 name = "kmf"
 version = "0.1.1"
 edition = "2024"
+license = "GPL-3.0-only"
+authors = ["zerodegress <zerodegress@outlook.com>"]
+homepage = "https://github.com/KorabliModForce/kmf"
+description = "Korabli mod installer cli."
 
 [dependencies]
 async-trait = "0.1.88"
