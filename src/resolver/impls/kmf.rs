@@ -23,14 +23,10 @@ pub struct KmfResolver {
 }
 
 impl KmfResolver {
-  pub fn new(
-    cache_record_file: PathBuf,
-    cache_dir: PathBuf,
-    ca_cache_dir: PathBuf,
-  ) -> Result<Self> {
+  pub async fn new(cache_dir: PathBuf) -> Result<Self> {
     Ok(Self {
       station_url_base: Url::parse("https://kmf-station.zice.top/").expect("it should be ok"),
-      inner: WebResolver::new(cache_record_file, cache_dir, ca_cache_dir)?,
+      inner: WebResolver::new(cache_dir).await?,
     })
   }
 

@@ -2,13 +2,15 @@ use std::{collections::HashMap, path::PathBuf, time::SystemTime};
 
 use crate::{
   resolver::{Error, ResolveInfo, Result},
-  util::{empty_dir, unzip_file},
+  util::{empty_dir, ensure_dir, ensure_file, unzip_file},
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use headers::{ContentLength, HeaderMapExt, LastModified};
 use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
+use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
+use reqwest_tracing::TracingMiddleware;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::{
@@ -38,23 +40,31 @@ impl From<ResolveInfo> for CacheRecord {
 
 pub struct WebResolver {
   cache_record_file: PathBuf,
-  cache_dir: PathBuf,
+  download_cache_dir: PathBuf,
   reqwest_client: reqwest_middleware::ClientWithMiddleware,
 }
 
 impl WebResolver {
-  pub fn new(
-    cache_record_file: PathBuf,
-    cache_dir: PathBuf,
-    ca_cache_dir: PathBuf,
-  ) -> Result<Self> {
+  pub async fn new(cache_dir: PathBuf) -> Result<Self> {
     Ok(Self {
-      cache_record_file,
-      cache_dir,
+      cache_record_file: ensure_file(cache_dir.join("record.toml").as_path())
+        .await?
+        .to_path_buf(),
+      download_cache_dir: ensure_dir(cache_dir.join("download").as_path())
+        .await?
+        .to_path_buf(),
       reqwest_client: reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
+        .with(TracingMiddleware::default())
+        .with(RetryTransientMiddleware::new_with_policy(
+          ExponentialBackoff::builder().build_with_max_retries(3),
+        ))
         .with(Cache(HttpCache {
           mode: CacheMode::Default,
-          manager: CACacheManager { path: ca_cache_dir },
+          manager: CACacheManager {
+            path: ensure_dir(cache_dir.join("http_ca").as_path())
+              .await?
+              .to_path_buf(),
+          },
           options: HttpCacheOptions::default(),
         }))
         .build(),
@@ -125,7 +135,7 @@ impl WebResolver {
 
   pub async fn cache(&self, url: Url) -> Result<PathBuf> {
     let resolve_info = self.resolve(url.to_owned()).await?;
-    let cache_dir = self.cache_dir.join(resolve_info.id.as_str());
+    let cache_dir = self.download_cache_dir.join(resolve_info.id.as_str());
     if self.is_up_to_date(url.to_owned()).await? {
       debug!("reuse current cache: {:?}", cache_dir);
       // 不需要重新缓存
@@ -161,7 +171,7 @@ impl WebResolver {
   }
 
   pub async fn clear_cache(&self) -> Result<()> {
-    empty_dir(self.cache_dir.as_path()).await?;
+    empty_dir(self.download_cache_dir.as_path()).await?;
     Ok(())
   }
 }

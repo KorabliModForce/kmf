@@ -12,8 +12,10 @@ use tokio::{
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 pub mod error;
+pub mod reqwest;
 
 pub use error::GetGameVersionsError;
+use tracing::warn;
 
 /// Returns a relative path without reserved names, redundant separators, ".", or "..".
 pub fn sanitize_file_path(path: &str) -> PathBuf {
@@ -140,7 +142,9 @@ pub async fn empty_dir(dir_path: &Path) -> Result<(), std::io::Error> {
   match fs::remove_dir_all(dir_path).await {
     Ok(_) => {}
     Err(err) => match err.kind() {
-      std::io::ErrorKind::NotFound => {}
+      std::io::ErrorKind::NotFound => {
+        warn!("creating dir {:?}", dir_path);
+      }
       _ => return Err(err),
     },
   }

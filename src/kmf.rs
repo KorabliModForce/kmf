@@ -7,9 +7,9 @@ use crate::{
     impls::{kmf::KmfResolver, web::WebResolver},
   },
   task::Task,
-  util::{async_copy_dir, ensure_dir, ensure_file, get_game_versions},
+  util::{async_copy_dir, ensure_dir, get_game_versions},
 };
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget};
 
 mod error;
 
@@ -30,34 +30,17 @@ impl Kmf {
       .map(|x| x.parse().expect("invalid config 'default_game'"));
     let cache_dir = ensure_dir(config.cache_dir.as_path()).await?;
 
-    let multi_progress = MultiProgress::new();
+    let multi_progress = MultiProgress::with_draw_target(match config.progress_draw_target {
+      crate::config::ProgressDrawTargetType::Stdout => ProgressDrawTarget::stdout(),
+      crate::config::ProgressDrawTargetType::Hidden => ProgressDrawTarget::hidden(),
+    });
 
     Ok(Self {
       default_game,
       multi_progress,
       resolvers: vec![
-        Box::new(KmfResolver::new(
-          ensure_file(cache_dir.join("kmf_resolver.toml").as_path())
-            .await?
-            .to_path_buf(),
-          ensure_dir(cache_dir.join("kmf_resolver").as_path())
-            .await?
-            .to_path_buf(),
-          ensure_dir(cache_dir.join("kmf_resolver_ca_cache_dir").as_path())
-            .await?
-            .to_path_buf(),
-        )?),
-        Box::new(WebResolver::new(
-          ensure_file(cache_dir.join("web_resolver.toml").as_path())
-            .await?
-            .to_path_buf(),
-          ensure_dir(cache_dir.join("web_resolver").as_path())
-            .await?
-            .to_path_buf(),
-          ensure_dir(cache_dir.join("web_resolver_ca_cache_dir").as_path())
-            .await?
-            .to_path_buf(),
-        )?),
+        Box::new(KmfResolver::new(cache_dir.join("kmf_resolver")).await?),
+        Box::new(WebResolver::new(cache_dir.join("web_resolver")).await?),
       ],
     })
   }
