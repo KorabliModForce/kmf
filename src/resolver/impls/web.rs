@@ -150,11 +150,7 @@ impl WebResolver {
     let temp_dir = temp_dir::TempDir::new()?;
     let temp_file = temp_dir.path().join("cache");
     {
-      let mut read = StreamReader::new(
-        res
-          .bytes_stream()
-          .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err)),
-      );
+      let mut read = StreamReader::new(res.bytes_stream().map_err(std::io::Error::other));
       let mut write = File::options()
         .create_new(true)
         .write(true)
