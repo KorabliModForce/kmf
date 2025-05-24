@@ -13,11 +13,14 @@ use error::Error;
 
 type Result<T> = std::result::Result<T, Error>;
 
+/// Kmf Config
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
   pub default_game: Option<String>,
+  /// Cache directory
   #[serde(default = "default_cache_dir")]
   pub cache_dir: PathBuf,
+  /// Progress draw target
   #[serde(default = "default_progress_draw_target")]
   pub progress_draw_target: ProgressDrawTargetType,
 }
@@ -32,6 +35,9 @@ impl Default for Config {
   }
 }
 
+/// Progress draw target type.
+/// Stdout: write progress bar to `stdout`.
+/// Hidden: do not write progress bar.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ProgressDrawTargetType {
   Stdout,
@@ -50,6 +56,7 @@ fn default_progress_draw_target() -> ProgressDrawTargetType {
 }
 
 impl Config {
+  /// Construct Config from config file
   pub async fn try_from_config_file(config_file: &Path) -> Result<Self> {
     let config = fs::read_to_string(config_file).await?;
     let config = toml::from_str::<Config>(config.as_str()).unwrap_or_else(|err| {
@@ -59,6 +66,7 @@ impl Config {
     Ok(config)
   }
 
+  /// Construct Config from cli and config file
   pub async fn try_from_cli(cli: &Cli) -> Result<Self> {
     let config = cli
       .config

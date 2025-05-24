@@ -23,6 +23,7 @@ pub struct Kmf {
 }
 
 impl Kmf {
+  /// Use config construct the Kmf instance
   pub async fn try_from_config(config: &Config) -> Result<Self, Error> {
     let default_game = config
       .default_game
@@ -113,6 +114,7 @@ impl Kmf {
     Ok(())
   }
 
+  /// Run task
   pub async fn run(&self, task: Task) -> Result<(), Error> {
     match task {
       Task::Install { url, game } => {

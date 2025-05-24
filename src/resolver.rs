@@ -8,6 +8,7 @@ use crate::util::error::UnzipFileError;
 
 pub mod impls;
 
+/// Mod error
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
   #[error("cannot resolve")]
@@ -28,6 +29,7 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Info resolved
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ResolveInfo {
@@ -37,6 +39,7 @@ pub struct ResolveInfo {
   pub size: u64,
 }
 
+/// Mod resolver
 #[allow(dead_code)]
 #[async_trait]
 pub trait Resolver {
